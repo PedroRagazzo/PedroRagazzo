@@ -116,12 +116,20 @@ function buildSvg(weeks, theme) {
       transform-origin: center;
       animation: wave-pulse ${totalDuration}s ease-in-out infinite;
     }
-    .cell-empty { animation: none; }
+    .cell-empty {
+      animation-name: wave-pulse-empty;
+    }
     @keyframes wave-pulse {
       0% { filter: brightness(1) saturate(1); transform: scale(1); }
       6% { filter: brightness(1.9) saturate(1.6); transform: scale(1.18); }
       14% { filter: brightness(1) saturate(1); transform: scale(1); }
       100% { filter: brightness(1) saturate(1); transform: scale(1); }
+    }
+    @keyframes wave-pulse-empty {
+      0% { transform: scale(1); }
+      6% { transform: scale(1.18); }
+      14% { transform: scale(1); }
+      100% { transform: scale(1); }
     }
   </style>
   ${rects}
