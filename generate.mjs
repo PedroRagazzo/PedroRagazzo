@@ -62,6 +62,13 @@ const PALETTES = {
   dark: ["#161b22", "#0e4429", "#006d32", "#26a641", "#39d353"],
 };
 
+// Outline color used to trace the wave through empty cells without
+// brightening their fill.
+const OUTLINE = {
+  light: "#8c959f",
+  dark: "#484f58",
+};
+
 function levelFromCount(count, maxCount) {
   if (count === 0) return 0;
   if (maxCount <= 4) return Math.min(4, count);
@@ -74,6 +81,7 @@ function levelFromCount(count, maxCount) {
 
 function buildSvg(weeks, theme) {
   const palette = PALETTES[theme];
+  const outline = OUTLINE[theme];
   const cell = 11;
   const gap = 3;
   const step = cell + gap;
@@ -105,7 +113,8 @@ function buildSvg(weeks, theme) {
       const x = marginLeft + colIndex * step;
       const y = marginTop + day.weekday * step;
       const cls = level === 0 ? "cell cell-empty" : "cell";
-      rects += `<rect class="${cls}" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" ry="2" fill="${fill}" style="animation-delay:${delay}s"><title>${day.date}: ${day.contributionCount} contributions</title></rect>\n`;
+      const strokeAttr = level === 0 ? ` stroke="${outline}"` : "";
+      rects += `<rect class="${cls}" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" ry="2" fill="${fill}"${strokeAttr} style="animation-delay:${delay}s"><title>${day.date}: ${day.contributionCount} contributions</title></rect>\n`;
     });
   });
 
@@ -118,6 +127,8 @@ function buildSvg(weeks, theme) {
     }
     .cell-empty {
       animation-name: wave-pulse-empty;
+      stroke-width: 0;
+      vector-effect: non-scaling-stroke;
     }
     @keyframes wave-pulse {
       0% { filter: brightness(1) saturate(1); transform: scale(1); }
@@ -126,10 +137,10 @@ function buildSvg(weeks, theme) {
       100% { filter: brightness(1) saturate(1); transform: scale(1); }
     }
     @keyframes wave-pulse-empty {
-      0% { transform: scale(1); }
-      6% { transform: scale(1.18); }
-      14% { transform: scale(1); }
-      100% { transform: scale(1); }
+      0% { transform: scale(1); stroke-width: 0; }
+      6% { transform: scale(1.35); stroke-width: 2.4; }
+      14% { transform: scale(1); stroke-width: 0; }
+      100% { transform: scale(1); stroke-width: 0; }
     }
   </style>
   ${rects}
