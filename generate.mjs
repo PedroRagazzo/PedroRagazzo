@@ -69,6 +69,32 @@ const OUTLINE = {
   dark: "#484f58",
 };
 
+// Peak of the crest per contribution level: busier days flare harder, so the
+// wave traces the shape of the graph instead of flattening it.
+const PEAKS = [
+  { scale: 1.3, brightness: 1, saturate: 1 }, // empty cells: outline only
+  { scale: 1.1, brightness: 1.45, saturate: 1.3 },
+  { scale: 1.14, brightness: 1.6, saturate: 1.4 },
+  { scale: 1.18, brightness: 1.75, saturate: 1.5 },
+  { scale: 1.22, brightness: 1.9, saturate: 1.6 },
+];
+
+// Shape of one cell's pulse, in seconds from the moment the crest reaches it:
+// a fast rise and a long decay, so the wave drags a fading tail behind its
+// front instead of blinking on and off.
+const CREST = 0.2;
+const GLOW = 0.55;
+const REST = 1.15;
+
+// Fraction of the peak still left as the tail passes through GLOW. Brightness
+// lingers longer than scale, which is what reads as afterglow.
+const TAIL_SCALE = 0.2;
+const TAIL_LIGHT = 0.45;
+
+// Snappy on the way up, soft on the way down.
+const EASE_UP = "cubic-bezier(.34,.9,.4,1)";
+const EASE_DOWN = "cubic-bezier(.3,0,.55,1)";
+
 function levelFromCount(count, maxCount) {
   if (count === 0) return 0;
   if (maxCount <= 4) return Math.min(4, count);
@@ -77,6 +103,45 @@ function levelFromCount(count, maxCount) {
   if (ratio > 0.5) return 3;
   if (ratio > 0.25) return 2;
   return 1;
+}
+
+// The pulse is described in seconds but keyframes take percentages, so every
+// stop is derived from the cycle length. Changing the sweep or the pause keeps
+// the shape of the wave intact.
+function buildKeyframes(totalDuration) {
+  const pct = (t) => Number(((t / totalDuration) * 100).toFixed(3));
+  const tail = (peak, keep) => Number((1 + (peak - 1) * keep).toFixed(3));
+
+  const crest = pct(CREST);
+  const glow = pct(GLOW);
+  const rest = pct(REST);
+
+  // Empty cells have nothing to brighten, so their crest is a ring that grows
+  // out of the cell edge and fades back into it.
+  const empty = `@keyframes wave-0 {
+      0% { transform: scale(1); stroke-width: 0; animation-timing-function: ${EASE_UP}; }
+      ${crest}% { transform: scale(${PEAKS[0].scale}); stroke-width: 2.4; animation-timing-function: ${EASE_DOWN}; }
+      ${glow}% { transform: scale(${tail(PEAKS[0].scale, TAIL_SCALE)}); stroke-width: 0.9; animation-timing-function: ease-out; }
+      ${rest}%, 100% { transform: scale(1); stroke-width: 0; }
+    }`;
+
+  const at = (scale, brightness, saturate) =>
+    `transform: scale(${scale}); filter: brightness(${brightness}) saturate(${saturate});`;
+
+  const filled = PEAKS.slice(1).map((peak, i) => {
+    return `@keyframes wave-${i + 1} {
+      0% { ${at(1, 1, 1)} animation-timing-function: ${EASE_UP}; }
+      ${crest}% { ${at(peak.scale, peak.brightness, peak.saturate)} animation-timing-function: ${EASE_DOWN}; }
+      ${glow}% { ${at(
+        tail(peak.scale, TAIL_SCALE),
+        tail(peak.brightness, TAIL_LIGHT),
+        tail(peak.saturate, TAIL_LIGHT)
+      )} animation-timing-function: ease-out; }
+      ${rest}%, 100% { ${at(1, 1, 1)} }
+    }`;
+  });
+
+  return [empty, ...filled].join("\n    ");
 }
 
 function buildSvg(weeks, theme) {
@@ -97,24 +162,25 @@ function buildSvg(weeks, theme) {
     ...weeks.flatMap((w) => w.contributionDays.map((d) => d.contributionCount))
   );
 
-  // Total time (seconds) for the wave to cross the whole graph once.
-  const sweepDuration = 3.2;
-  // Pause between sweeps.
-  const pause = 2.2;
+  // Total time (seconds) for the crest to cross the whole graph once.
+  const sweepDuration = 4;
+  // Pause between sweeps. Has to outlast the tail of the last column, or the
+  // next sweep starts while the previous one is still fading out.
+  const pause = 2;
   const totalDuration = sweepDuration + pause;
   const perColDelay = cols > 1 ? sweepDuration / (cols - 1) : 0;
+  // Lower rows lag slightly, tilting the crest instead of sweeping it across
+  // as a perfectly vertical bar.
+  const perRowDelay = perColDelay * 0.35;
 
   let rects = "";
   weeks.forEach((week, colIndex) => {
-    const delay = (colIndex * perColDelay).toFixed(3);
     week.contributionDays.forEach((day) => {
       const level = levelFromCount(day.contributionCount, maxCount);
-      const fill = palette[level];
+      const delay = (colIndex * perColDelay + day.weekday * perRowDelay).toFixed(3);
       const x = marginLeft + colIndex * step;
       const y = marginTop + day.weekday * step;
-      const cls = level === 0 ? "cell cell-empty" : "cell";
-      const strokeAttr = level === 0 ? ` stroke="${outline}"` : "";
-      rects += `<rect class="${cls}" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" ry="2" fill="${fill}"${strokeAttr} style="animation-delay:${delay}s"><title>${day.date}: ${day.contributionCount} contributions</title></rect>\n`;
+      rects += `<rect class="cell lvl-${level}" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" ry="2" fill="${palette[level]}" style="animation-delay:${delay}s"><title>${day.date}: ${day.contributionCount} contributions</title></rect>\n`;
     });
   });
 
@@ -123,24 +189,24 @@ function buildSvg(weeks, theme) {
     .cell {
       transform-box: fill-box;
       transform-origin: center;
-      animation: wave-pulse ${totalDuration}s ease-in-out infinite;
+      animation-duration: ${totalDuration}s;
+      animation-iteration-count: infinite;
+      /* Timing lives in the keyframes, one easing per segment of the pulse. */
+      animation-timing-function: linear;
     }
-    .cell-empty {
-      animation-name: wave-pulse-empty;
+    .lvl-0 {
+      animation-name: wave-0;
+      stroke: ${outline};
       stroke-width: 0;
       vector-effect: non-scaling-stroke;
     }
-    @keyframes wave-pulse {
-      0% { filter: brightness(1) saturate(1); transform: scale(1); }
-      6% { filter: brightness(1.9) saturate(1.6); transform: scale(1.18); }
-      14% { filter: brightness(1) saturate(1); transform: scale(1); }
-      100% { filter: brightness(1) saturate(1); transform: scale(1); }
-    }
-    @keyframes wave-pulse-empty {
-      0% { transform: scale(1); stroke-width: 0; }
-      6% { transform: scale(1.35); stroke-width: 2.4; }
-      14% { transform: scale(1); stroke-width: 0; }
-      100% { transform: scale(1); stroke-width: 0; }
+    .lvl-1 { animation-name: wave-1; }
+    .lvl-2 { animation-name: wave-2; }
+    .lvl-3 { animation-name: wave-3; }
+    .lvl-4 { animation-name: wave-4; }
+    ${buildKeyframes(totalDuration)}
+    @media (prefers-reduced-motion: reduce) {
+      .cell { animation: none; }
     }
   </style>
   ${rects}
