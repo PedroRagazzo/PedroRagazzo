@@ -86,6 +86,15 @@ const CREST = 0.2;
 const GLOW = 0.55;
 const REST = 1.15;
 
+// Empty cells only trace a thin ring, with no color to blend into their
+// neighbors the way a brightening fill does. Giving that ring the same long
+// tail as a color pulse left it glowing on its own, several columns behind
+// the visible crest, long after everything around it had gone quiet -- which
+// read as a stray pixel flickering behind the wave rather than part of it.
+// Its own pulse rises on the same beat but lets go much sooner.
+const GLOW_EMPTY = 0.32;
+const REST_EMPTY = 0.55;
+
 // Fraction of the peak still left as the tail passes through GLOW. Brightness
 // lingers longer than scale, which is what reads as afterglow.
 const TAIL_SCALE = 0.2;
@@ -115,14 +124,19 @@ function buildKeyframes(totalDuration) {
   const crest = pct(CREST);
   const glow = pct(GLOW);
   const rest = pct(REST);
+  const glowEmpty = pct(GLOW_EMPTY);
+  const restEmpty = pct(REST_EMPTY);
 
   // Empty cells have nothing to brighten, so their crest is a ring that grows
-  // out of the cell edge and fades back into it.
+  // out of the cell edge and fades back into it. The stroke's width stays
+  // fixed and only its opacity animates: animating stroke-width itself drags
+  // the ring through sub-pixel widths, which alias into a stray flickering
+  // pixel instead of a smooth line once dozens of these run at once.
   const empty = `@keyframes wave-0 {
-      0% { transform: scale(1); stroke-width: 0; animation-timing-function: ${EASE_UP}; }
-      ${crest}% { transform: scale(${PEAKS[0].scale}); stroke-width: 2.4; animation-timing-function: ${EASE_DOWN}; }
-      ${glow}% { transform: scale(${tail(PEAKS[0].scale, TAIL_SCALE)}); stroke-width: 0.9; animation-timing-function: ease-out; }
-      ${rest}%, 100% { transform: scale(1); stroke-width: 0; }
+      0% { transform: scale(1); stroke-opacity: 0; animation-timing-function: ${EASE_UP}; }
+      ${crest}% { transform: scale(${PEAKS[0].scale}); stroke-opacity: 1; animation-timing-function: ${EASE_DOWN}; }
+      ${glowEmpty}% { transform: scale(${tail(PEAKS[0].scale, TAIL_SCALE)}); stroke-opacity: ${TAIL_LIGHT}; animation-timing-function: ease-out; }
+      ${restEmpty}%, 100% { transform: scale(1); stroke-opacity: 0; }
     }`;
 
   const at = (scale, brightness, saturate) =>
@@ -170,8 +184,14 @@ function buildSvg(weeks, theme) {
   const totalDuration = sweepDuration + pause;
   const perColDelay = cols > 1 ? sweepDuration / (cols - 1) : 0;
   // Lower rows lag slightly, tilting the crest instead of sweeping it across
-  // as a perfectly vertical bar.
-  const perRowDelay = perColDelay * 0.35;
+  // as a perfectly vertical bar. The full tilt (top row to bottom row) is
+  // capped well under one column's worth of delay, so a column's own rows
+  // still crest as a single band instead of overlapping the columns next to
+  // it — that overlap was smearing the crest across ~2 columns at once,
+  // which read as scattered pixels flickering behind the visible front
+  // rather than one coherent wave.
+  const rowTiltSpan = perColDelay * 0.5;
+  const perRowDelay = rowTiltSpan / 6;
 
   let rects = "";
   weeks.forEach((week, colIndex) => {
@@ -197,7 +217,8 @@ function buildSvg(weeks, theme) {
     .lvl-0 {
       animation-name: wave-0;
       stroke: ${outline};
-      stroke-width: 0;
+      stroke-width: 1.4;
+      stroke-opacity: 0;
       vector-effect: non-scaling-stroke;
     }
     .lvl-1 { animation-name: wave-1; }
